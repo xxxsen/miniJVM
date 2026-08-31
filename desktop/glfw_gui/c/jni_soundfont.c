@@ -104,14 +104,7 @@ static void apply_midi_message(tsf *synth, const tml_message *message) {
     }
 }
 
-static int soundfont_render_to_wave(Runtime *runtime, JClass *clazz) {
-    JniEnv *env = runtime->jnienv;
-    Instance *midi_data = env->localvar_getRefer(runtime->localvar, 0);
-    Instance *soundfont_path_array = env->localvar_getRefer(runtime->localvar, 1);
-    Instance *wave_path_array = env->localvar_getRefer(runtime->localvar, 2);
-    char soundfont_path[512];
-    char wave_path[512];
-    tml_message *messages = NULL;
+static int render_messages_to_wave(tml_message *messages, const char *soundfont_path, const char *wave_path) {
     tml_message *message;
     FILE *output = NULL;
     uint64_t current_frame = 0;
@@ -122,19 +115,7 @@ static int soundfont_render_to_wave(Runtime *runtime, JClass *clazz) {
     int result = -1;
     int channel;
 
-    (void) clazz;
-    if (!midi_data || !midi_data->arr_body || midi_data->arr_length <= 0 ||
-        !copy_path(soundfont_path_array, soundfont_path, sizeof(soundfont_path)) ||
-        !copy_path(wave_path_array, wave_path, sizeof(wave_path))) {
-        env->push_int(runtime->stack, result);
-        return 0;
-    }
-
-    messages = tml_load_memory(midi_data->arr_body, midi_data->arr_length);
-    if (!messages) {
-        env->push_int(runtime->stack, -2);
-        return 0;
-    }
+    if (!messages) return -2;
 
     pthread_mutex_lock(&soundfont_mutex);
     if (!soundfont_synth) soundfont_synth = tsf_load_filename(soundfont_path);
@@ -188,12 +169,55 @@ cleanup:
     pthread_mutex_unlock(&soundfont_mutex);
     tml_free(messages);
     if (result < 0) remove(wave_path);
+    return result;
+}
+
+static int soundfont_render_to_wave(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    Instance *midi_data = env->localvar_getRefer(runtime->localvar, 0);
+    Instance *soundfont_path_array = env->localvar_getRefer(runtime->localvar, 1);
+    Instance *wave_path_array = env->localvar_getRefer(runtime->localvar, 2);
+    char soundfont_path[512];
+    char wave_path[512];
+    tml_message *messages;
+    int result = -1;
+
+    (void) clazz;
+    if (midi_data && midi_data->arr_body && midi_data->arr_length > 0 &&
+        copy_path(soundfont_path_array, soundfont_path, sizeof(soundfont_path)) &&
+        copy_path(wave_path_array, wave_path, sizeof(wave_path))) {
+        messages = tml_load_memory(midi_data->arr_body, midi_data->arr_length);
+        result = render_messages_to_wave(messages, soundfont_path, wave_path);
+    }
+    env->push_int(runtime->stack, result);
+    return 0;
+}
+
+static int soundfont_render_file_to_wave(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    Instance *midi_path_array = env->localvar_getRefer(runtime->localvar, 0);
+    Instance *soundfont_path_array = env->localvar_getRefer(runtime->localvar, 1);
+    Instance *wave_path_array = env->localvar_getRefer(runtime->localvar, 2);
+    char midi_path[512];
+    char soundfont_path[512];
+    char wave_path[512];
+    tml_message *messages;
+    int result = -1;
+
+    (void) clazz;
+    if (copy_path(midi_path_array, midi_path, sizeof(midi_path)) &&
+        copy_path(soundfont_path_array, soundfont_path, sizeof(soundfont_path)) &&
+        copy_path(wave_path_array, wave_path, sizeof(wave_path))) {
+        messages = tml_load_filename(midi_path);
+        result = render_messages_to_wave(messages, soundfont_path, wave_path);
+    }
     env->push_int(runtime->stack, result);
     return 0;
 }
 
 static java_native_method soundfont_methods[] = {
     {"com/ebsee/emu/audio/SoundFontSynth", "renderToWave", "([B[B[B)I", soundfont_render_to_wave},
+    {"com/ebsee/emu/audio/SoundFontSynth", "renderFileToWave", "([B[B[B)I", soundfont_render_file_to_wave},
 };
 
 s32 count_SoundFontFuncTable(void) {
