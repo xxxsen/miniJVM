@@ -52,6 +52,10 @@ public final class URL {
     return handler.toExternalForm(this);
   }
 
+  public String toExternalForm() {
+    return handler.toExternalForm(this);
+  }
+
   public String getProtocol() {
     return protocol;
   }
