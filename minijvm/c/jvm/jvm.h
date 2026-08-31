@@ -40,7 +40,13 @@ extern "C" {
 #define GARBAGE_OVERLOAD_DEFAULT 80  // overload of max heap size ,will active garbage collection
 #define GARBAGE_PERIOD_MS_DEFAULT 10 * 1000
 #define MAX_HEAP_SIZE_DEFAULT  384 * 1024 * 1024
+#if defined(EMSCRIPTEN_WINAPP)
+// Browser MIDlets often wrap media resources in byte-at-a-time streams. Their
+// media setup runs through a deeper interpreted call chain than desktop code.
+#define MAX_STACK_SIZE_DEFAULT 65536
+#else
 #define MAX_STACK_SIZE_DEFAULT 4096
+#endif
 
 
 //#pragma GCC diagnostic error "-Wframe-larger-than="
