@@ -92,6 +92,10 @@ public final class URL {
     return openStream();
   }
 
+  public URI toURI() throws URISyntaxException {
+    return new URI(toString());
+  }
+
   private static String resolve(URL context, String spec)
     throws MalformedURLException
   {
