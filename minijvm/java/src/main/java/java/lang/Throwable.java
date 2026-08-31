@@ -86,7 +86,7 @@ public class Throwable {
      */
     private transient Object backtrace = buildStackElement(Thread.currentThread());//
 
-    private Throwable cause = this;
+    Throwable cause = this;
 
     /**
      * Constructs a new <code>Throwable</code> with <code>null</code> as its
