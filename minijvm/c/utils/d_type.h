@@ -74,7 +74,16 @@
 #   error "Unknown compiler"
 #endif
 
-#if 1
+/*
+ * mimalloc currently relies on virtual-memory page semantics that do not map
+ * cleanly to Emscripten's growable linear memory.  In browsers this can leave
+ * the mimalloc page map in a non-zero state during startup and prevent the VM
+ * from reaching its main loop.  Use the platform allocator for WebAssembly;
+ * native builds retain the existing mimalloc-backed accounting.
+ */
+#if defined(__EMSCRIPTEN__)
+#define __JVM_PRI_ALLOC__ 0
+#else
 #define __JVM_PRI_ALLOC__ 1
 #endif
 
