@@ -71,8 +71,3 @@ s64 get_gl_proc(const char *namez) {
     void *ptr = get_proc(namez);
     return (s64) (intptr_t) ptr;
 }
-
-int main(void) {
-
-    return 0;
-}
