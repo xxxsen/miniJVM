@@ -32,6 +32,7 @@ import org.mini.vm.RefNative;
 import java.io.UnsupportedEncodingException;
 import java.util.Formatter;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -1294,6 +1295,13 @@ public final class String implements Comparable<String>, CharSequence {
         return new String(0, count, buf);
     }
 
+    public String toLowerCase(Locale locale) {
+        if (locale == null) {
+            throw new NullPointerException("locale");
+        }
+        return toLowerCase();
+    }
+
     /**
      * Converts all of the characters in this <code>String</code> to upper case.
      *
@@ -1323,6 +1331,13 @@ public final class String implements Comparable<String>, CharSequence {
             buf[i] = Character.toUpperCase(value[offset + i]);
         }
         return new String(0, count, buf);
+    }
+
+    public String toUpperCase(Locale locale) {
+        if (locale == null) {
+            throw new NullPointerException("locale");
+        }
+        return toUpperCase();
     }
 
     /**
