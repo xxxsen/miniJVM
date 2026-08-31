@@ -74,7 +74,6 @@ import java.util.Objects;
  */
 public class Throwable {
 
-    Throwable cause = this;
     /**
      * WARNING: this must be the first variable. Specific details about the
      * <code>Throwable</code> object.
@@ -86,6 +85,8 @@ public class Throwable {
      * indication of the stack backtrace in this slot.
      */
     private transient Object backtrace = buildStackElement(Thread.currentThread());//
+
+    private Throwable cause = this;
 
     /**
      * Constructs a new <code>Throwable</code> with <code>null</code> as its
