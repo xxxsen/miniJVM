@@ -524,6 +524,10 @@ s32 _gc_thread_run(void *para) {
  */
 
 s64 _garbage_collect(GcCollector *collector) {
+#ifdef EMSCRIPTEN
+//TODO: Find and solve Deadlock
+return 0;
+#endif
     collector->isgc = 1;
     s64 mem_total = 0, mem_free = 0;
     s64 del = 0;

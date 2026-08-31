@@ -4,7 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 #include "deps/include/glad/glad.h"
+#ifdef EMSCRIPTEN
+#include <GLFW/glfw3.h>
+#include <emscripten.h>
+#else
 #include "deps/include/GLFW/glfw3.h"
+#endif
 #include "deps/include/linmath.h"
 
 //#define STB_IMAGE_IMPLEMENTATION
@@ -36,232 +41,328 @@ static void _callback_error_before_init(int error, const char *description) {
 
 static void _callback_error(int error, const char *description) {
     if (refers._callback_error) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
         Utf8String *ustr = env->utf8_create_part_c((c8 *) description, 0, strlen(description));
-        Instance *jstr = refers.env->jstring_create(ustr, refers.runtime);
+        Instance *jstr = refers.env->jstring_create(ustr, runtime);
         env->utf8_destory(ustr);
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_int(refers.runtime->stack, error);
-        env->push_ref(refers.runtime->stack, jstr);
-        s32 ret = env->execute_method(refers._callback_error, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_int(runtime->stack, error);
+        env->push_ref(runtime->stack, jstr);
+        s32 ret = env->execute_method(refers._callback_error, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 static void _callback_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
     if (refers._callback_key) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, key);
-        env->push_int(refers.runtime->stack, scancode);
-        env->push_int(refers.runtime->stack, action);
-        env->push_int(refers.runtime->stack, mods);
-        s32 ret = env->execute_method(refers._callback_key, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, key);
+        env->push_int(runtime->stack, scancode);
+        env->push_int(runtime->stack, action);
+        env->push_int(runtime->stack, mods);
+        s32 ret = env->execute_method(refers._callback_key, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 static void _callback_character(GLFWwindow *window, u32 ch) {
     if (refers._callback_character) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, ch);
-        s32 ret = env->execute_method(refers._callback_character, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, ch);
+        s32 ret = env->execute_method(refers._callback_character, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
+#ifdef EMSCRIPTEN
+EMSCRIPTEN_KEEPALIVE
+void callback_key_js(int key, int special)
+{
+  Runtime *runtime = getRuntimeCurThread(refers.env);
+  s32 pos = 0;
+  GLFWwindow *window = (__refer) (intptr_t) runtime->jnienv->localvar_getLong_2slot(runtime->localvar, pos);
+//  _callback_key(window, key, scancode, action, mods);
+  if (special == 1) // Delete
+  {
+    _callback_key(window, 259, 8, 1, 0);
+    _callback_key(window, 259, 8, 0, 0);
+  }
+  else
+  {
+    _callback_character(window, key);
+  }
+}
+#endif
+
 static void _callback_drop(GLFWwindow *window, s32 count, const c8 **cstrs) {
     if (refers._callback_drop) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, count);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, count);
         c8 *STR_JAVA_LANG_STRING = "java/lang/String";
         Utf8String *cls = env->utf8_create_part_c(STR_JAVA_LANG_STRING, 0, strlen(STR_JAVA_LANG_STRING));
         Instance *jstrs = env->jarray_create_by_type_name(refers.runtime, count, cls, NULL);
         env->utf8_destory(cls);
         s32 i;
         for (i = 0; i < count; i++) {
-            s64 val = (intptr_t) createJavaString(refers.runtime, (c8 *) cstrs[i]);
+            s64 val = (intptr_t) createJavaString(runtime, (c8 *) cstrs[i]);
             env->jarray_set_field(jstrs, i, val);
         }
-        env->push_ref(refers.runtime->stack, jstrs);
-        s32 ret = env->execute_method(refers._callback_drop, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, jstrs);
+        s32 ret = env->execute_method(refers._callback_drop, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _button_callback_mouse(GLFWwindow *window, int button, int action, int mods) {
     if (refers._button_callback_mouse) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, button);
-        env->push_int(refers.runtime->stack, action == GLFW_PRESS);
-        s32 ret = env->execute_method(refers._button_callback_mouse, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, button);
+        env->push_int(runtime->stack, action == GLFW_PRESS);
+        s32 ret = env->execute_method(refers._button_callback_mouse, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_scroll(GLFWwindow *window, double scrollX, double scrollY) {
     if (refers._scroll_callback) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_double(refers.runtime->stack, scrollX);
-        env->push_double(refers.runtime->stack, scrollY);
-        s32 ret = env->execute_method(refers._scroll_callback, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_double(runtime->stack, scrollX);
+        env->push_double(runtime->stack, scrollY);
+        s32 ret = env->execute_method(refers._scroll_callback, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_cursor_pos(GLFWwindow *window, f64 x, f64 y) {
     if (refers._callback_cursor_pos) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, x);
-        env->push_int(refers.runtime->stack, y);
-        s32 ret = env->execute_method(refers._callback_cursor_pos, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, x);
+        env->push_int(runtime->stack, y);
+        s32 ret = env->execute_method(refers._callback_cursor_pos, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_cursor_enter(GLFWwindow *window, s32 enter) {
     if (refers._callback_cursor_enter) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, enter);
-        s32 ret = env->execute_method(refers._callback_cursor_enter, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, enter);
+        s32 ret = env->execute_method(refers._callback_cursor_enter, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_window_size(GLFWwindow *window, s32 w, s32 h) {
     if (refers._callback_window_size) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, w);
-        env->push_int(refers.runtime->stack, h);
-        s32 ret = env->execute_method(refers._callback_window_size, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, w);
+        env->push_int(runtime->stack, h);
+        s32 ret = env->execute_method(refers._callback_window_size, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_window_pos(GLFWwindow *window, s32 w, s32 h) {
     if (refers._callback_window_pos) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, w);
-        env->push_int(refers.runtime->stack, h);
-        s32 ret = env->execute_method(refers._callback_window_pos, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, w);
+        env->push_int(runtime->stack, h);
+        s32 ret = env->execute_method(refers._callback_window_pos, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_window_close(GLFWwindow *window) {
     if (refers._callback_window_close) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        s32 ret = env->execute_method(refers._callback_window_close, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        s32 ret = env->execute_method(refers._callback_window_close, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         } else {
-            env->pop_empty(refers.runtime->stack);
+            env->pop_empty(runtime->stack);
         }
     }
 }
 
 void _callback_window_focus(GLFWwindow *window, s32 focus) {
     if (refers._callback_window_focus) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, focus);
-        s32 ret = env->execute_method(refers._callback_window_focus, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, focus);
+        s32 ret = env->execute_method(refers._callback_window_focus, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_window_iconify(GLFWwindow *window, s32 iconified) {
     if (refers._callback_window_iconify) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, iconified);
-        s32 ret = env->execute_method(refers._callback_window_iconify, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, iconified);
+        s32 ret = env->execute_method(refers._callback_window_iconify, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_window_refresh(GLFWwindow *window) {
     if (refers._callback_window_refresh) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        s32 ret = env->execute_method(refers._callback_window_refresh, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        s32 ret = env->execute_method(refers._callback_window_refresh, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
+        }
+    }
+}
+
+void _callback_main_loop() {
+    if (refers._callback_main_loop) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
+        JniEnv *env = refers.env;
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        s32 ret = env->execute_method(refers._callback_main_loop, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
 
 void _callback_framebuffer_size(GLFWwindow *window, s32 w, s32 h) {
     if (refers._callback_framebuffer_size) {
+#ifdef EMSCRIPTEN
+        Runtime *runtime = getRuntimeCurThread(refers.env);
+#else
+        Runtime *runtime = refers.runtime;
+#endif
         JniEnv *env = refers.env;
-        env->push_ref(refers.runtime->stack, refers.glfw_callback);
-        env->push_long(refers.runtime->stack, (s64) (intptr_t) window);
-        env->push_int(refers.runtime->stack, w);
-        env->push_int(refers.runtime->stack, h);
-        s32 ret = env->execute_method(refers._callback_framebuffer_size, refers.runtime);
-        if (ret == RUNTIME_STATUS_ERROR) {
-        } else if (ret == RUNTIME_STATUS_EXCEPTION) {
-            env->print_exception(refers.runtime);
+        env->push_ref(runtime->stack, refers.glfw_callback);
+        env->push_long(runtime->stack, (s64) (intptr_t) window);
+        env->push_int(runtime->stack, w);
+        env->push_int(runtime->stack, h);
+        s32 ret = env->execute_method(refers._callback_framebuffer_size, runtime);
+        if (ret == RUNTIME_STATUS_EXCEPTION) {
+            env->print_exception(runtime);
         }
     }
 }
@@ -1186,6 +1287,28 @@ int org_mini_glfw_Glfw_glfwSetCallback(Runtime *runtime, JClass *clazz) {
         env->utf8_destory(name);
         env->utf8_destory(type);
     }
+    {
+        name_s = "mainLoop";
+        type_s = "()V";
+        Utf8String *name = env->utf8_create_part_c(name_s, 0, strlen(name_s));
+        Utf8String *type = env->utf8_create_part_c(type_s, 0, strlen(type_s));
+        refers._callback_main_loop =
+                env->find_methodInfo_by_name(refers.glfw_callback->mb.clazz->name, name, type, clazz->jloader, runtime);
+        env->utf8_destory(name);
+        env->utf8_destory(type);
+    }
+    return 0;
+}
+
+int org_mini_glfw_Glfw_executeMainLoop(Runtime *runtime, JClass *clazz) {
+#ifdef EMSCRIPTEN
+    emscripten_set_main_loop(_callback_main_loop, 0, 1);
+#else
+    JniEnv *env = runtime->jnienv;
+    s32 pos = 0;
+    GLFWwindow *window = (__refer) (intptr_t) env->localvar_getLong_2slot(runtime->localvar, pos);
+    while (GL_TRUE == glfwWindowShouldClose((GLFWwindow *) window)) { _callback_main_loop(); } //TODO: Not tested yet
+#endif
     return 0;
 }
 
@@ -1296,7 +1419,9 @@ int org_mini_glfw_Glfw_glfwMakeContextCurrentJni(Runtime *runtime, JClass *clazz
     GLFWwindow *window = (__refer) (intptr_t) env->localvar_getLong_2slot(runtime->localvar, pos);
     pos += 2;
     glfwMakeContextCurrent(window);
+#ifndef __EMSCRIPTEN__
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
+#endif
     return 0;
 }
 
@@ -1693,6 +1818,7 @@ static java_native_method method_glfw_table[] = {
         {"org/mini/glfw/Glfw", "glfwDestroyWindow",          "(J)V",                             org_mini_glfw_Glfw_glfwDestroyWindow},
         {"org/mini/glfw/Glfw", "glfwWindowShouldClose",      "(J)Z",                             org_mini_glfw_Glfw_glfwWindowShouldClose},
         {"org/mini/glfw/Glfw", "glfwSetCallback",            "(JLorg/mini/glfw/GlfwCallback;)V", org_mini_glfw_Glfw_glfwSetCallback},
+        {"org/mini/glfw/Glfw", "executeMainLoop",            "()V",                              org_mini_glfw_Glfw_executeMainLoop},
         {"org/mini/glfw/Glfw", "glfwInitJni",                "()Z",                              org_mini_glfw_Glfw_glfwInitJni},
         {"org/mini/glfw/Glfw", "glfwTerminate",              "()V",                              org_mini_glfw_Glfw_glfwTerminate},
         {"org/mini/glfw/Glfw", "glfwWindowHint",             "(II)V",                            org_mini_glfw_Glfw_glfwWindowHint},

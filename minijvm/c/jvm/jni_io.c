@@ -65,7 +65,9 @@ extern "C" {
 #endif
 
 #include "ssl_client.h"
+#ifndef EMSCRIPTEN
 #include "../utils/https/mbedtls/include/mbedtls/net_sockets.h"
+#endif
 
 #if __JVM_OS_MINGW__
 
@@ -1183,7 +1185,7 @@ s32 org_mini_fs_InnerFile_listDir(Runtime *runtime, JClass *clazz) {
 }
 
 s32 org_mini_fs_InnerFile_listWinDrivers(Runtime *runtime, JClass *clazz) {
-#if  defined(__JVM_OS_MAC__) || defined(__JVM_OS_LINUX__)
+#if defined(__JVM_OS_MAC__) || defined(__JVM_OS_LINUX__) || defined(EMSCRIPTEN)
 
     push_ref(runtime->stack, NULL);
 

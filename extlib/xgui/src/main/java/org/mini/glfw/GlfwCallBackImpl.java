@@ -149,52 +149,62 @@ public class GlfwCallBackImpl extends GCallBack {
 
     @Override
     public void mainLoop() {
-        //
+        if ("Emscripten".equals(System.getProperty("os.name"))) {
+            runFrame();
+            return;
+        }
+
         long last = System.currentTimeMillis(), now;
         int count = 0;
-
-        long startAt, cost;
         while (!Glfw.glfwWindowShouldClose(display)) {
-            try {
-                if (gapp == null) {
+            long startAt = System.currentTimeMillis();
+            if (!runFrame()) {
+                return;
+            }
+
+            count++;
+            now = System.currentTimeMillis();
+            if (now - last > 1000) {
+                fps = count;
+                last = now;
+                count = 0;
+            }
+
+            long cost = now - startAt;
+            if (cost < 0) cost = 0;
+            if (cost < 1000 / fpsExpect) {
+                try {
+                    Thread.sleep((long) (1000 / fpsExpect - cost));
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
                     return;
                 }
-                try {
-                    setOpenglThread(gapp.getClass().getClassLoader());
-                    desktop.checkAppRun(gapp);
-                } catch (Exception e) {
-                    gapp.closeApp();
-                    desktop.addMessage("Init error: " + e.getMessage());
-                    e.printStackTrace();
-                }
-                startAt = System.currentTimeMillis();
-                //user define contents
-                if (desktop.flushReq()) {
-                    desktop.display(vg);
-                    //GToolkit.drawText(vg, 0, 0, 200, 30, mouseX + " , " + mouseY);
-                    Glfw.glfwSwapBuffers(display);
-                }
-                Glfw.glfwPollEvents();
-                count++;
-                now = System.currentTimeMillis();
-                if (now - last > 1000) {
-                    //System.out.println("fps:" + count);
-                    fps = count;
-                    last = now;
-                    count = 0;
-                }
-
-                cost = now - startAt;
-                //System.out.println(cost);
-                if (cost < 0) cost = 0;
-                if (cost < 1000 / fpsExpect) {
-                    Thread.sleep((long) (1000 / fpsExpect - cost));
-                }
-//                Sync.sync((int) fpsExpect);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-
             }
+        }
+    }
+
+    private boolean runFrame() {
+        if (gapp == null) {
+            return false;
+        }
+        try {
+            try {
+                setOpenglThread(gapp.getClass().getClassLoader());
+                desktop.checkAppRun(gapp);
+            } catch (Exception e) {
+                gapp.closeApp();
+                desktop.addMessage("Init error: " + e.getMessage());
+                e.printStackTrace();
+            }
+            if (desktop.flushReq()) {
+                desktop.display(vg);
+                Glfw.glfwSwapBuffers(display);
+            }
+            Glfw.glfwPollEvents();
+            return true;
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return false;
         }
     }
 
