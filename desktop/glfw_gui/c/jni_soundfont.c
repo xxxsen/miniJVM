@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #define TSF_IMPLEMENTATION
 #include "tsf.h"
@@ -222,9 +225,291 @@ static int soundfont_render_file_to_wave(Runtime *runtime, JClass *clazz) {
     return 0;
 }
 
+static int browser_audio_create(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    Instance *media = env->localvar_getRefer(runtime->localvar, 0);
+    s64 duration_micros = env->localvar_getLong_2slot(runtime->localvar, 1);
+    int duration_millis = duration_micros < 0 ? -1 : (int) (duration_micros / 1000);
+    int handle = 0;
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    if (media && media->arr_body && media->arr_length > 0) {
+        handle = MAIN_THREAD_EM_ASM_INT({
+            const root = window.__j2meWebAudio || (window.__j2meWebAudio = {});
+            if (!root.context) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                root.context = new AudioContextClass();
+                root.items = new Map();
+                root.nextId = 1;
+                root.stats = new Object();
+                root.stats.begins = 0;
+                root.stats.closes = 0;
+                root.stats.creates = 0;
+                root.stats.starts = 0;
+                root.stats.stops = 0;
+                root.analyser = root.context.createAnalyser();
+                root.analyser.fftSize = 2048;
+                root.analyser.connect(root.context.destination);
+                root.begin = (item) => {
+                    if (!item.buffer || !item.playRequested || item.closed) return;
+                    root.stats.begins += 1;
+                    if (item.source) {
+                        item.source.onended = null;
+                        try { item.source.stop(); } catch (_) {}
+                    }
+                    const source = root.context.createBufferSource();
+                    const gain = root.context.createGain();
+                    source.buffer = item.buffer;
+                    source.loop = item.loopCount < 0;
+                    gain.gain.value = item.volume;
+                    source.connect(gain);
+                    gain.connect(root.analyser);
+                    item.source = source;
+                    item.gain = gain;
+                    item.running = true;
+                    item.startedAt = root.context.currentTime;
+                    source.onended = () => {
+                        if (item.source !== source) return;
+                        item.source = null;
+                        item.running = false;
+                        if (item.playRequested && item.remaining > 1) {
+                            item.remaining -= 1;
+                            item.position = 0;
+                            root.begin(item);
+                        } else if (!source.loop) {
+                            item.playRequested = false;
+                            item.position = 0;
+                        }
+                    };
+                    source.start(0, Math.min(item.position, Math.max(0, item.buffer.duration - 0.001)));
+                };
+                root.stop = (item) => {
+                    if (item.source) {
+                        item.position += Math.max(0, root.context.currentTime - item.startedAt);
+                        item.source.onended = null;
+                        try { item.source.stop(); } catch (_) {}
+                        item.source = null;
+                    }
+                    item.running = false;
+                };
+            }
+            const id = root.nextId++;
+            const item = new Object();
+            item.buffer = null;
+            item.closed = false;
+            item.duration = $2 / 1000;
+            item.gain = null;
+            item.loopCount = 1;
+            item.playRequested = false;
+            item.position = 0;
+            item.remaining = 1;
+            item.running = false;
+            item.source = null;
+            item.volume = 1;
+            root.items.set(id, item);
+            root.stats.creates += 1;
+            const encoded = HEAPU8.slice($0, $0 + $1).buffer;
+            root.context.decodeAudioData(encoded).then((buffer) => {
+                if (item.closed) return;
+                item.buffer = buffer;
+                item.duration = buffer.duration;
+                if (item.playRequested) root.begin(item);
+            }).catch((error) => {
+                item.playRequested = false;
+                console.error("[audio] browser decode failed", error);
+            });
+            return id;
+        }, media->arr_body, media->arr_length, duration_millis);
+    }
+#endif
+    env->push_int(runtime->stack, handle);
+    return 0;
+}
+
+static int browser_audio_start(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_EM_ASM({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (item && !item.closed) {
+            root.stats.starts += 1;
+            item.playRequested = true;
+            item.remaining = item.loopCount < 0 ? -1 : Math.max(1, item.loopCount || 1);
+            root.context.resume();
+            if (!item.running) root.begin(item);
+        }
+    }, handle);
+#endif
+    return 0;
+}
+
+static int browser_audio_stop(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_EM_ASM({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (item) {
+            root.stats.stops += 1;
+            item.playRequested = false;
+            root.stop(item);
+        }
+    }, handle);
+#endif
+    return 0;
+}
+
+static int browser_audio_close(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_EM_ASM({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (item) {
+            root.stats.closes += 1;
+            item.playRequested = false;
+            item.closed = true;
+            root.stop(item);
+            root.items.delete($0);
+        }
+    }, handle);
+#endif
+    return 0;
+}
+
+static int browser_audio_set_loop_count(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    int count = env->localvar_getInt(runtime->localvar, 1);
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_EM_ASM({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (item) {
+            item.loopCount = $1;
+            item.remaining = $1 < 0 ? -1 : Math.max(1, $1 || 1);
+            if (item.source) item.source.loop = $1 < 0;
+        }
+    }, handle, count);
+#endif
+    return 0;
+}
+
+static int browser_audio_set_media_time(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    s64 micros = env->localvar_getLong_2slot(runtime->localvar, 1);
+    s64 result = micros;
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    int milliseconds = (int) (micros / 1000);
+    int applied = MAIN_THREAD_EM_ASM_INT({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (!item) return $1;
+        const restart = item.playRequested;
+        root.stop(item);
+        item.position = Math.max(0, Math.min($1 / 1000, item.duration || $1 / 1000));
+        item.playRequested = restart;
+        if (restart) root.begin(item);
+        return Math.round(item.position * 1000);
+    }, handle, milliseconds);
+    result = (s64) applied * 1000;
+#endif
+    env->push_long(runtime->stack, result);
+    return 0;
+}
+
+static int browser_audio_get_media_time(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    int milliseconds = 0;
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    milliseconds = MAIN_THREAD_EM_ASM_INT({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (!item) return 0;
+        const elapsed = item.running ? Math.max(0, root.context.currentTime - item.startedAt) : 0;
+        return Math.round((item.position + elapsed) * 1000);
+    }, handle);
+#endif
+    env->push_long(runtime->stack, (s64) milliseconds * 1000);
+    return 0;
+}
+
+static int browser_audio_get_duration(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    int milliseconds = -1;
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    milliseconds = MAIN_THREAD_EM_ASM_INT({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        return item && item.duration >= 0 ? Math.round(item.duration * 1000) : -1;
+    }, handle);
+#endif
+    env->push_long(runtime->stack, milliseconds < 0 ? -1 : (s64) milliseconds * 1000);
+    return 0;
+}
+
+static int browser_audio_is_running(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    int running = 0;
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    running = MAIN_THREAD_EM_ASM_INT({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        return item && item.playRequested ? 1 : 0;
+    }, handle);
+#endif
+    env->push_int(runtime->stack, running);
+    return 0;
+}
+
+static int browser_audio_set_volume(Runtime *runtime, JClass *clazz) {
+    JniEnv *env = runtime->jnienv;
+    int handle = env->localvar_getInt(runtime->localvar, 0);
+    Int2Float volume;
+    volume.i = env->localvar_getInt(runtime->localvar, 1);
+    (void) clazz;
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_EM_ASM({
+        const root = window.__j2meWebAudio;
+        const item = root && root.items.get($0);
+        if (item) {
+            item.volume = Math.max(0, Math.min(1, $1));
+            if (item.gain) item.gain.gain.value = item.volume;
+        }
+    }, handle, volume.f);
+#endif
+    return 0;
+}
+
 static java_native_method soundfont_methods[] = {
     {"com/ebsee/emu/audio/SoundFontSynth", "renderToWave", "([B[B[B)I", soundfont_render_to_wave},
     {"com/ebsee/emu/audio/SoundFontSynth", "renderFileToWave", "([B[B[B)I", soundfont_render_file_to_wave},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "create", "([BJ)I", browser_audio_create},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "start", "(I)V", browser_audio_start},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "stop", "(I)V", browser_audio_stop},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "close", "(I)V", browser_audio_close},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "setLoopCount", "(II)V", browser_audio_set_loop_count},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "setMediaTime", "(IJ)J", browser_audio_set_media_time},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "getMediaTime", "(I)J", browser_audio_get_media_time},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "getDuration", "(I)J", browser_audio_get_duration},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "isRunning", "(I)Z", browser_audio_is_running},
+    {"com/ebsee/emu/audio/BrowserAudioHandle", "setVolume", "(IF)V", browser_audio_set_volume},
 };
 
 s32 count_SoundFontFuncTable(void) {
