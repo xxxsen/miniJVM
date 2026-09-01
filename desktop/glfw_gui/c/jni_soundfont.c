@@ -11,8 +11,8 @@
 #include "jvm.h"
 #include "jni_soundfont.h"
 
-#define SOUNDFONT_SAMPLE_RATE 44100
-#define SOUNDFONT_CHANNELS 2
+#define SOUNDFONT_SAMPLE_RATE 22050
+#define SOUNDFONT_CHANNELS 1
 /*
  * Emscripten's virtual filesystem makes each fwrite comparatively expensive.
  * A larger block keeps identical PCM output while avoiding hundreds of tiny
@@ -136,7 +136,9 @@ static int render_messages_to_wave(tml_message *messages, const char *soundfont_
     }
 
     tsf_reset(soundfont_synth);
-    tsf_set_output(soundfont_synth, TSF_STEREO_INTERLEAVED, SOUNDFONT_SAMPLE_RATE, -7.0f);
+    /* MIDP devices are predominantly mono; this cuts browser render work and
+       memory by roughly four times without replacing the SoundFont synth. */
+    tsf_set_output(soundfont_synth, TSF_MONO, SOUNDFONT_SAMPLE_RATE, -7.0f);
     for (channel = 0; channel < 16; channel++) {
         tsf_channel_set_presetnumber(soundfont_synth, channel, 0, channel == 9);
     }
