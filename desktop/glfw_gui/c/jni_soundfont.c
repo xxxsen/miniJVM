@@ -13,7 +13,12 @@
 
 #define SOUNDFONT_SAMPLE_RATE 44100
 #define SOUNDFONT_CHANNELS 2
-#define SOUNDFONT_RENDER_BLOCK 512
+/*
+ * Emscripten's virtual filesystem makes each fwrite comparatively expensive.
+ * A larger block keeps identical PCM output while avoiding hundreds of tiny
+ * writes during the synchronous TinySoundFont render.
+ */
+#define SOUNDFONT_RENDER_BLOCK 8192
 #define SOUNDFONT_TAIL_MILLISECONDS 120
 #define SOUNDFONT_MAX_MILLISECONDS 180000
 
