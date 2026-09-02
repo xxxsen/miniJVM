@@ -1,38 +1,104 @@
 #include "miniz.h"
 #include "miniz_wrapper.h"
+#include "tinycthread.h"
+
+#define ZIP_READER_CACHE_CAPACITY 32
+
+typedef struct _CachedZipReader {
+    char *path;
+    mz_zip_archive archive;
+    mtx_t lock;
+} CachedZipReader;
+
+static CachedZipReader zip_reader_cache[ZIP_READER_CACHE_CAPACITY];
+static int zip_reader_cache_size;
+static mtx_t zip_reader_cache_lock;
+static once_flag zip_reader_cache_once = ONCE_FLAG_INIT;
+
+static void zip_reader_cache_destroy(void) {
+    int i;
+    mtx_lock(&zip_reader_cache_lock);
+    for (i = 0; i < zip_reader_cache_size; i++) {
+        mz_zip_reader_end(&zip_reader_cache[i].archive);
+        mtx_destroy(&zip_reader_cache[i].lock);
+        MZ_FREE(zip_reader_cache[i].path);
+        zip_reader_cache[i].path = NULL;
+    }
+    zip_reader_cache_size = 0;
+    mtx_unlock(&zip_reader_cache_lock);
+    mtx_destroy(&zip_reader_cache_lock);
+}
+
+static void zip_reader_cache_init(void) {
+    mtx_init(&zip_reader_cache_lock, mtx_plain);
+    atexit(zip_reader_cache_destroy);
+}
+
+static CachedZipReader *zip_reader_cache_get(char const *jarpath) {
+    CachedZipReader *entry = NULL;
+    int i;
+    call_once(&zip_reader_cache_once, zip_reader_cache_init);
+    mtx_lock(&zip_reader_cache_lock);
+    for (i = 0; i < zip_reader_cache_size; i++) {
+        if (strcmp(zip_reader_cache[i].path, jarpath) == 0) {
+            entry = &zip_reader_cache[i];
+            break;
+        }
+    }
+    if (entry == NULL && zip_reader_cache_size < ZIP_READER_CACHE_CAPACITY) {
+        size_t path_len = strlen(jarpath) + 1;
+        entry = &zip_reader_cache[zip_reader_cache_size];
+        memset(entry, 0, sizeof(*entry));
+        entry->path = (char *) MZ_MALLOC(path_len);
+        if (entry->path != NULL) {
+            memcpy(entry->path, jarpath, path_len);
+            int lock_ready = mtx_init(&entry->lock, mtx_plain) == thrd_success;
+            if (lock_ready && mz_zip_reader_init_file(&entry->archive, jarpath, 0) == MZ_TRUE) {
+                zip_reader_cache_size++;
+            } else {
+                if (lock_ready) mtx_destroy(&entry->lock);
+                MZ_FREE(entry->path);
+                memset(entry, 0, sizeof(*entry));
+                entry = NULL;
+            }
+        } else {
+            entry = NULL;
+        }
+    }
+    mtx_unlock(&zip_reader_cache_lock);
+    return entry;
+}
 
 
 s32 zip_loadfile(char const *jarpath, char const *filename, ByteBuf *buf) {
     int file_index = 0;
-    mz_zip_archive zipArchive = {0};
     mz_zip_archive_file_stat file_stat = {0};
+    CachedZipReader *cached;
 
     //skip the first '/'
     if (filename && filename[0] == '/') {
         filename += 1;
     }
 
-    int ret = 0;
-    if (mz_zip_reader_init_file(&zipArchive, jarpath, 0) == MZ_FALSE) {//
-        ret = -1;
-    } else {
-
-        file_index = mz_zip_reader_locate_file(&zipArchive, filename, NULL, 0);//
-        if (!mz_zip_reader_file_stat(&zipArchive, file_index, &file_stat)) {
-            ret = -1;
-        } else {
-            size_t uncompressed_size = (size_t) file_stat.m_uncomp_size;
-            bytebuf_expand(buf, uncompressed_size);
-            mz_bool p = mz_zip_reader_extract_file_to_mem(&zipArchive, file_stat.m_filename, buf->buf, uncompressed_size, 0);
-            if (p == MZ_FALSE) {
-                ret = -1;
-            } else {
-                buf->wp = uncompressed_size;
-            }
-        }
-        mz_zip_reader_end(&zipArchive);
+    cached = zip_reader_cache_get(jarpath);
+    if (cached == NULL) {
+        return -1;
     }
-    return ret;
+    mtx_lock(&cached->lock);
+    file_index = mz_zip_reader_locate_file(&cached->archive, filename, NULL, 0);
+    if (file_index < 0 || !mz_zip_reader_file_stat(&cached->archive, file_index, &file_stat)) {
+        mtx_unlock(&cached->lock);
+        return -1;
+    }
+    size_t uncompressed_size = (size_t) file_stat.m_uncomp_size;
+    bytebuf_expand(buf, uncompressed_size);
+    if (mz_zip_reader_extract_to_mem(&cached->archive, file_index, buf->buf, uncompressed_size, 0) == MZ_FALSE) {
+        mtx_unlock(&cached->lock);
+        return -1;
+    }
+    buf->wp = uncompressed_size;
+    mtx_unlock(&cached->lock);
+    return 0;
 }
 
 
