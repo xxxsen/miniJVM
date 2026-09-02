@@ -2109,7 +2109,6 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                 //                    int debug = 1;
                 //                }
 
-                runtime->thrd_info->no_pause++;
                 utf8_clear(clsName);
                 utf8_append(clsName, pClassName);
                 utf8_replace_c(clsName, "/", ".");
@@ -2117,7 +2116,13 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                 push_ref(runtime->stack, jstr);
                 push_ref(runtime->stack, jloader);
 
+                /* The Java ClassLoader may read and inflate an entry from a
+                   large MIDlet JAR. Its arguments are rooted on the operand
+                   stack, so let that Java work run at normal GC safepoints
+                   instead of retaining the recursive VM metadata lock. */
+                vm_share_unlock(jvm);
                 s32 ret = execute_method_impl(jvm->shortcut.launcher_loadClass, runtime);
+                vm_share_lock(jvm);
                 if (!ret) {
                     Instance *ins_of_clazz = pop_ref(runtime->stack);
                     if (ins_of_clazz) {
@@ -2129,7 +2134,6 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                     //Instance *ins = pop_ref(runtime->stack);
                     //jvm_printf("load class exception:%s\n", utf8_cstr(ins->mb.clazz->name));
                 }
-                runtime->thrd_info->no_pause--;
             }
         }
     }
