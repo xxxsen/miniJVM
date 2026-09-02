@@ -12,6 +12,7 @@
 #include "tml.h"
 
 #include "jvm.h"
+#include "jvm_util.h"
 #include "jni_soundfont.h"
 
 #define SOUNDFONT_SAMPLE_RATE 22050
@@ -197,7 +198,14 @@ static int soundfont_render_to_wave(Runtime *runtime, JClass *clazz) {
         copy_path(soundfont_path_array, soundfont_path, sizeof(soundfont_path)) &&
         copy_path(wave_path_array, wave_path, sizeof(wave_path))) {
         messages = tml_load_memory(midi_data->arr_body, midi_data->arr_length);
+        /* TinySoundFont may synthesize minutes of PCM. At this point all Java
+           inputs have been copied and the MIDI parser owns its message list,
+           so GC can safely treat this native worker like a blocking I/O call.
+           block_exit performs the required safepoint before we touch the VM
+           stack again. */
+        jthread_block_enter(runtime);
         result = render_messages_to_wave(messages, soundfont_path, wave_path);
+        jthread_block_exit(runtime);
     }
     env->push_int(runtime->stack, result);
     return 0;
@@ -219,7 +227,9 @@ static int soundfont_render_file_to_wave(Runtime *runtime, JClass *clazz) {
         copy_path(soundfont_path_array, soundfont_path, sizeof(soundfont_path)) &&
         copy_path(wave_path_array, wave_path, sizeof(wave_path))) {
         messages = tml_load_filename(midi_path);
+        jthread_block_enter(runtime);
         result = render_messages_to_wave(messages, soundfont_path, wave_path);
+        jthread_block_exit(runtime);
     }
     env->push_int(runtime->stack, result);
     return 0;
