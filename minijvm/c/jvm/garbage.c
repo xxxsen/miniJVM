@@ -540,7 +540,19 @@ s64 _garbage_collect(GcCollector *collector) {
     //point of view; abort this attempt and retry on a later collector tick.
     {
         const s64 lock_deadline = currentTimeMillis() + 5000;
+        if (__atomic_load_n(&jvm->class_load_depth, __ATOMIC_SEQ_CST) > 0) {
+            collector->isgc = 0;
+            return 0;
+        }
         while (vm_share_trylock(jvm) != thrd_success) {
+            // Class loading mutates metadata under the coordination lock and
+            // is intentionally not a GC safepoint. Defer this periodic cycle
+            // instead of misreporting a classpath read as a lock timeout; the
+            // next collector tick runs after the bounded load completes.
+            if (__atomic_load_n(&jvm->class_load_depth, __ATOMIC_SEQ_CST) > 0) {
+                collector->isgc = 0;
+                return 0;
+            }
             if (currentTimeMillis() >= lock_deadline) {
                 collector->isgc = 0;
                 if (collector->dump_flag == 1) {

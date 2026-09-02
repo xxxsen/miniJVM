@@ -2092,6 +2092,7 @@ struct _MiniJVM {
     Hashtable *table_jstring_const; //for cache same string
 
     ThreadLock threadlock;
+    volatile s32 class_load_depth;
 
     Utf8String *startup_dir;
 

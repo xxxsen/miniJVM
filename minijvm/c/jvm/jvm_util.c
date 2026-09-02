@@ -69,10 +69,12 @@ JClass *classes_load_get_without_resolve(Instance *jloader, Utf8String *ustr, Ru
     cl = classes_get(jvm, jloader, ustr);
     if (!cl) {
         vm_share_lock(jvm); //slow lock
+        __atomic_add_fetch(&jvm->class_load_depth, 1, __ATOMIC_SEQ_CST);
         cl = classes_get(jvm, jloader, ustr);
         if (!cl) {
             cl = load_class(jloader, ustr, runtime);
         }
+        __atomic_sub_fetch(&jvm->class_load_depth, 1, __ATOMIC_SEQ_CST);
         vm_share_unlock(jvm);
     }
     return cl;
