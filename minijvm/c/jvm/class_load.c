@@ -2128,7 +2128,8 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                     Utf8String *loader_name = jloader->mb.clazz->name;
                     release_inherited =
                             utf8_equals_c(loader_name, "org/recompile/mobile/MIDletLoader") ||
-                            utf8_equals_c(loader_name, "sun/misc/Launcher$AppClassLoader");
+                            utf8_equals_c(loader_name, "sun/misc/Launcher$AppClassLoader") ||
+                            utf8_equals_c(loader_name, "org/mini/apploader/StandalongGuiAppClassLoader");
                 }
                 do {
                     vm_share_unlock(jvm);
