@@ -547,7 +547,24 @@ s64 _garbage_collect(GcCollector *collector) {
                     collector->dump_rc = -7;
                     collector->dump_flag = 3;
                 }
-                jvm_printf("[WARN] GC canceled - VM coordination lock timeout\n");
+                jvm_printf("[WARN] GC canceled - VM coordination lock timeout owner=%lld depth=%d\n",
+                           (s64) (intptr_t) jvm->threadlock.owner_thread,
+                           jvm->threadlock.count);
+                {
+                    s32 i;
+                    for (i = 0; i < jvm->thread_list->length; i++) {
+                        Runtime *owner_runtime = arraylist_get_value_unsafe(jvm->thread_list, i);
+                        if (owner_runtime && owner_runtime->thrd_info &&
+                            (JavaThreadInfo *) (intptr_t) owner_runtime->thrd_info->pthread ==
+                                jvm->threadlock.owner_thread) {
+                            Utf8String *stack = utf8_create();
+                            getRuntimeStackWithOutReturn(owner_runtime, stack);
+                            jvm_printf("[WARN] VM coordination lock owner stack: %s\n", utf8_cstr(stack));
+                            utf8_destroy(stack);
+                            break;
+                        }
+                    }
+                }
                 return -1;
             }
             threadSleep(2);

@@ -369,14 +369,33 @@ void thread_lock_dispose(ThreadLock *lock) {
 
 
 s32 vm_share_trylock(MiniJVM *jvm) {
-    return mtx_trylock(&jvm->threadlock.mutex_lock);
+    s32 result = mtx_trylock(&jvm->threadlock.mutex_lock);
+    if (result == thrd_success) {
+        JavaThreadInfo *owner = (JavaThreadInfo *) (intptr_t) thrd_current();
+        if (jvm->threadlock.owner_thread == owner) jvm->threadlock.count++;
+        else {
+            jvm->threadlock.owner_thread = owner;
+            jvm->threadlock.count = 1;
+        }
+    }
+    return result;
 }
 
 void vm_share_lock(MiniJVM *jvm) {
     mtx_lock(&jvm->threadlock.mutex_lock);
+    JavaThreadInfo *owner = (JavaThreadInfo *) (intptr_t) thrd_current();
+    if (jvm->threadlock.owner_thread == owner) jvm->threadlock.count++;
+    else {
+        jvm->threadlock.owner_thread = owner;
+        jvm->threadlock.count = 1;
+    }
 }
 
 void vm_share_unlock(MiniJVM *jvm) {
+    JavaThreadInfo *owner = (JavaThreadInfo *) (intptr_t) thrd_current();
+    if (jvm->threadlock.owner_thread == owner && --jvm->threadlock.count == 0) {
+        jvm->threadlock.owner_thread = NULL;
+    }
     mtx_unlock(&jvm->threadlock.mutex_lock);
 }
 
