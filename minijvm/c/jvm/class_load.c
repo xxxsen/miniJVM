@@ -2126,10 +2126,13 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                 s32 release_inherited = 0;
                 if (jloader && jloader->mb.clazz) {
                     Utf8String *loader_name = jloader->mb.clazz->name;
+                    s32 standalone_media_load =
+                            utf8_equals_c(loader_name, "org/mini/apploader/StandalongGuiAppClassLoader") &&
+                            utf8_equals_c(pClassName, "org/recompile/mobile/MiniJvmPlatformPlayer");
                     release_inherited =
                             utf8_equals_c(loader_name, "org/recompile/mobile/MIDletLoader") ||
                             utf8_equals_c(loader_name, "sun/misc/Launcher$AppClassLoader") ||
-                            utf8_equals_c(loader_name, "org/mini/apploader/StandalongGuiAppClassLoader");
+                            standalone_media_load;
                 }
                 do {
                     vm_share_unlock(jvm);
