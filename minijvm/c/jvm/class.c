@@ -449,6 +449,11 @@ s32 class_prepar(Instance *loader, JClass *clazz, Runtime *runtime) {
  * @param runtime  runtime
  */
 void class_clinit(JClass *clazz, Runtime *runtime) {
+    /* Resolution and <clinit> run on the caller's shared operand stack. The
+       current VM reports and suppresses initialization failures here, so no
+       temporary value or exception object may escape into the pending caller
+       expression. */
+    StackEntry *caller_sp = runtime->stack->sp;
     vm_share_lock(runtime->jvm);
     runtime->thrd_info->no_pause++;
     if (clazz->status < CLASS_STATUS_PREPARED) {
@@ -591,6 +596,7 @@ void class_clinit(JClass *clazz, Runtime *runtime) {
 #endif
         clazz->status = CLASS_STATUS_CLINITED;
     }
+    runtime->stack->sp = caller_sp;
     runtime->thrd_info->no_pause--;
     vm_share_unlock(runtime->jvm);
 }
