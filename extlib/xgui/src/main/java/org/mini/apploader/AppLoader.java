@@ -423,14 +423,7 @@ public final class AppLoader {
                         return file.getName().endsWith(".jar");
                     }
                 });
-                int filesCnt = (files != null ? files.length : 0);
-                String[] paths = new String[filesCnt + 1];
-                if (filesCnt > 0) {
-                    for (int i = 0; i < filesCnt; i++) {
-                        paths[i] = files[i].getAbsolutePath();
-                    }
-                }
-                paths[paths.length - 1] = getAppJarPath(jarName);
+                String[] paths = createAppClassPath(getAppJarPath(jarName), files);
 
                 StandalongGuiAppClassLoader sgacl = new StandalongGuiAppClassLoader(paths, ClassLoader.getSystemClassLoader());
                 Thread.currentThread().setContextClassLoader(sgacl);
@@ -442,6 +435,19 @@ public final class AppLoader {
             ex.printStackTrace();
         }
         return null;
+    }
+
+    static String[] createAppClassPath(String appJarPath, File[] dependencyJars) {
+        int dependencyCount = dependencyJars != null ? dependencyJars.length : 0;
+        String[] paths = new String[dependencyCount + 1];
+        // The app/fat JAR owns its adapter classes and must be able to override a
+        // class shipped by an embedded dependency. This also matches the usual
+        // Java class-path rule where the application entry precedes libraries.
+        paths[0] = appJarPath;
+        for (int i = 0; i < dependencyCount; i++) {
+            paths[i + 1] = dependencyJars[i].getAbsolutePath();
+        }
+        return paths;
     }
 
     public static byte[] getApplicationIcon(String jarName) {
