@@ -245,8 +245,12 @@ static int browser_audio_create(Runtime *runtime, JClass *clazz) {
                 root.stats.begins = 0;
                 root.stats.closes = 0;
                 root.stats.creates = 0;
+                root.stats.decodeFailures = 0;
                 root.stats.starts = 0;
                 root.stats.stops = 0;
+                root.stats.transcodeBegins = 0;
+                root.stats.transcodeFailures = 0;
+                root.stats.transcodeSuccesses = 0;
                 root.analyser = root.context.createAnalyser();
                 root.analyser.fftSize = 2048;
                 root.analyser.connect(root.context.destination);
@@ -261,7 +265,7 @@ static int browser_audio_create(Runtime *runtime, JClass *clazz) {
                     const gain = root.context.createGain();
                     source.buffer = item.buffer;
                     source.loop = item.loopCount < 0;
-                    gain.gain.value = item.volume;
+                    gain.gain.value = item.volume * item.profileGain * item.masterGain;
                     source.connect(gain);
                     gain.connect(root.analyser);
                     item.source = source;
@@ -306,17 +310,40 @@ static int browser_audio_create(Runtime *runtime, JClass *clazz) {
             item.running = false;
             item.source = null;
             item.volume = 1;
+            const profile = window.__j2meAudioProfile || {};
+            item.profileGain = Math.max(0, Math.min(2, Number.isFinite(profile.gain) ? profile.gain : 1));
+            item.masterGain = Math.max(0, Math.min(1, Number.isFinite(profile.masterGain) ? profile.masterGain : 1));
             root.items.set(id, item);
             root.stats.creates += 1;
             const encoded = HEAPU8.slice($0, $0 + $1).buffer;
-            root.context.decodeAudioData(encoded).then((buffer) => {
+            const accept = (buffer) => {
                 if (item.closed) return;
                 item.buffer = buffer;
                 item.duration = buffer.duration;
                 if (item.playRequested) root.begin(item);
-            }).catch((error) => {
+            };
+            const fail = (error) => {
                 item.playRequested = false;
                 console.error("[audio] browser decode failed", error);
+            };
+            root.context.decodeAudioData(encoded.slice(0)).then(accept).catch((decodeError) => {
+                root.stats.decodeFailures += 1;
+                const transcode = window.__j2meMediaTranscode;
+                if (typeof transcode !== "function") {
+                    fail(decodeError);
+                    return;
+                }
+                root.stats.transcodeBegins += 1;
+                Promise.resolve(transcode(encoded))
+                    .then((wave) => root.context.decodeAudioData(wave))
+                    .then((buffer) => {
+                        root.stats.transcodeSuccesses += 1;
+                        accept(buffer);
+                    })
+                    .catch((error) => {
+                        root.stats.transcodeFailures += 1;
+                        fail(error);
+                    });
             });
             return id;
         }, media->arr_body, media->arr_length, duration_millis);
@@ -490,7 +517,7 @@ static int browser_audio_set_volume(Runtime *runtime, JClass *clazz) {
         const item = root && root.items.get($0);
         if (item) {
             item.volume = Math.max(0, Math.min(1, $1));
-            if (item.gain) item.gain.gain.value = item.volume;
+            if (item.gain) item.gain.gain.value = item.volume * item.profileGain * item.masterGain;
         }
     }, handle, volume.f);
 #endif
