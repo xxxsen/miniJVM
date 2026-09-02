@@ -45,6 +45,7 @@ struct _GcCollectorType {
     u8 mark_cnt;
     volatile u8 isgc;
     volatile u8 isworldstoped;
+    volatile u8 stw_thread_list_locked;
     volatile u8 dump_flag;
     Utf8String *dump_path;
     s32 dump_flags;
@@ -52,6 +53,7 @@ struct _GcCollectorType {
     s16 exit_flag;
     s16 exit_code;
     volatile s64 stw_total_ns;
+    volatile s64 gc_cycle_count;
 };
 
 enum {

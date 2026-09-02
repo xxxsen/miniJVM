@@ -524,27 +524,46 @@ s32 _gc_thread_run(void *para) {
  */
 
 s64 _garbage_collect(GcCollector *collector) {
-#ifdef EMSCRIPTEN
-//TODO: Find and solve Deadlock
-return 0;
-#endif
     collector->isgc = 1;
     s64 mem_total = 0, mem_free = 0;
     s64 del = 0;
     s64 time, start;
     s64 stw_start_ns = 0;
+    s64 stw_start_ms = 0;
     Utf8String *threads_dump = NULL;
     MiniJVM *jvm = collector->jvm;
 
     start = time = currentTimeMillis();
 
-    //prepar gc resource ,
-    vm_share_lock(jvm);
+    //prepar gc resource. Do not let a long class initializer or a broken
+    //native call occupy the VM coordination lock forever from the GC thread's
+    //point of view; abort this attempt and retry on a later collector tick.
+    {
+        const s64 lock_deadline = currentTimeMillis() + 5000;
+        while (vm_share_trylock(jvm) != thrd_success) {
+            if (currentTimeMillis() >= lock_deadline) {
+                collector->isgc = 0;
+                if (collector->dump_flag == 1) {
+                    collector->dump_rc = -7;
+                    collector->dump_flag = 3;
+                }
+                jvm_printf("[WARN] GC canceled - VM coordination lock timeout\n");
+                return -1;
+            }
+            threadSleep(2);
+        }
+    }
     {
         stw_start_ns = nanoTime();
+        stw_start_ms = currentTimeMillis();
         if (_gc_pause_the_world(jvm) != 0) {
             _gc_resume_the_world(jvm);
             vm_share_unlock(jvm);
+            collector->isgc = 0;
+            if (collector->dump_flag == 1) {
+                collector->dump_rc = -7;
+                collector->dump_flag = 3;
+            }
             jvm_printf("[WARN] GC canceled - failed to pause the world\n");
             return -1;
         }
@@ -608,7 +627,12 @@ return 0;
     jvm_printf("garbage_resume_the_world %lld\n", (currentTimeMillis() - time));
 #endif
 
-    s64 time_stopWorld = currentTimeMillis() - start;
+    /* Time spent waiting for the VM coordination lock is not a world pause:
+     * the current mutator (notably a long class initializer) is still running.
+     * Measure STW only after the lock has been acquired and suspend requests
+     * are about to be issued. */
+    s64 lock_wait_ms = stw_start_ms > start ? stw_start_ms - start : 0;
+    s64 time_stopWorld = stw_start_ms > 0 ? currentTimeMillis() - stw_start_ms : 0;
     time = currentTimeMillis();
     //
 
@@ -745,6 +769,12 @@ return 0;
     jvm_squeeze(0);
 #endif
     collector->isgc = 0;
+#ifdef EMSCRIPTEN
+    collector->gc_cycle_count++;
+    jvm_printf("[j2me-web-gc] cycle=%lld before=%lld after=%lld reclaimed=%lld wait_ms=%lld stw_ms=%lld\n",
+               collector->gc_cycle_count, mem_total, collector->obj_heap_size,
+               mem_free, lock_wait_ms, time_stopWorld);
+#endif
     return del;
 }
 
@@ -788,21 +818,62 @@ s32 _gc_pause_the_world(MiniJVM *jvm) {
     GcCollector *collector = jvm->collector;
     ArrayList *thread_list = jvm->thread_list;
     s32 i;
-    //jvm_printf("thread size:%d\n", thread_list->length);
-    arraylist_iter_safe(thread_list, _list_iter_thread_pause, NULL);
+    const s64 deadline = currentTimeMillis() + 5000;
+
+    /* Keep the Runtime pointers stable until resume. A thread that is being
+     * created or disposed waits on this lock instead of appearing halfway
+     * through a stop-the-world cycle without a matching suspend request. */
+    while (spin_trylock(&thread_list->spinlock) != 0) {
+        if (currentTimeMillis() >= deadline) {
+            jvm_printf("[WARN] GC canceled - thread list lock timeout\n");
+            return -1;
+        }
+        threadSleep(1);
+    }
+    collector->stw_thread_list_locked = 1;
+    for (i = 0; i < thread_list->length; i++) {
+        Runtime *runtime = arraylist_get_value_unsafe(thread_list, i);
+        if (runtime) jthread_suspend(runtime);
+    }
 
     s32 all_thread_paused = 1;
     while (1) {
         all_thread_paused = 1;
-        arraylist_iter_safe(thread_list, _list_iter_thread_check_pause, &all_thread_paused);
-
-        vm_share_timedwait(jvm, 20);
+        for (i = 0; i < thread_list->length; i++) {
+            Runtime *runtime = arraylist_get_value_unsafe(thread_list, i);
+            if (!runtime || runtime->thrd_info->thread_status == THREAD_STATUS_NEW ||
+                runtime->thrd_info->thread_status == THREAD_STATUS_ZOMBIE ||
+                runtime->thrd_info->is_suspend || runtime->thrd_info->is_blocking) {
+                continue;
+            }
+            all_thread_paused = 0;
+            break;
+        }
         if (all_thread_paused) {
             break;
         }
+        if (currentTimeMillis() >= deadline) {
+            for (i = 0; i < thread_list->length; i++) {
+                Runtime *runtime = arraylist_get_value_unsafe(thread_list, i);
+                if (runtime && runtime->thrd_info->thread_status != THREAD_STATUS_NEW &&
+                    runtime->thrd_info->thread_status != THREAD_STATUS_ZOMBIE &&
+                    !runtime->thrd_info->is_suspend && !runtime->thrd_info->is_blocking) {
+                    jvm_printf("[WARN] GC safepoint timeout: thread=%lld status=%d suspend=%d blocking=%d\n",
+                               (s64) (intptr_t) runtime->thrd_info->pthread,
+                               runtime->thrd_info->thread_status,
+                               runtime->thrd_info->suspend_count,
+                               runtime->thrd_info->is_blocking);
+                }
+            }
+            return -1;
+        }
+        vm_share_timedwait(jvm, 20);
     }
 
-    arraylist_iter_safe(thread_list, _list_iter_thread_move_objs_2_gc, NULL);
+    for (i = 0; i < thread_list->length; i++) {
+        Runtime *runtime = arraylist_get_value_unsafe(thread_list, i);
+        if (runtime) gc_move_objs_thread_2_gc(runtime);
+    }
     //此处可能存在多线程交互，比如某个线程结束等情况，导致for错误，crush
     //         spin_lock(&thread_list->spinlock);
     //         {
@@ -831,8 +902,10 @@ s32 _gc_resume_the_world(MiniJVM *jvm) {
     GcCollector *collector = jvm->collector;
     ArrayList *thread_list = jvm->thread_list;
     s32 i;
+
+    if (!collector->stw_thread_list_locked) return 0;
     for (i = 0; i < thread_list->length; i++) {
-        Runtime *runtime = arraylist_get_value(thread_list, i);
+        Runtime *runtime = arraylist_get_value_unsafe(thread_list, i);
         if (runtime) {
 #if _JVM_DEBUG_GARBAGE_DUMP > 1
             Utf8String *stack = utf8_create();
@@ -844,6 +917,8 @@ s32 _gc_resume_the_world(MiniJVM *jvm) {
             vm_share_notifyall(jvm);
         }
     }
+    collector->stw_thread_list_locked = 0;
+    spin_unlock(&thread_list->spinlock);
 
     return 0;
 }

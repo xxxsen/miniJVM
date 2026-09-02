@@ -1302,6 +1302,12 @@ int org_mini_glfw_Glfw_glfwSetCallback(Runtime *runtime, JClass *clazz) {
 
 int org_mini_glfw_Glfw_executeMainLoop(Runtime *runtime, JClass *clazz) {
 #ifdef EMSCRIPTEN
+    /* emscripten_set_main_loop(..., simulate_infinite_loop=1) never returns to
+     * this native frame. Mark the launcher Runtime as blocked before control
+     * is transferred; Java callbacks use execute_method(), which temporarily
+     * leaves the blocking state and therefore still participate in GC
+     * safepoints while bytecode is executing. */
+    runtime->jnienv->jthread_block_enter(runtime);
     emscripten_set_main_loop(_callback_main_loop, 0, 1);
 #else
     JniEnv *env = runtime->jnienv;
