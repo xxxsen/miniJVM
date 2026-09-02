@@ -574,7 +574,14 @@ void class_clinit(JClass *clazz, Runtime *runtime) {
         //Initialize the base class first
         JClass *superclass = getSuperClass(clazz);
         if (superclass && superclass->status < CLASS_STATUS_CLINITED) {
+            /* Class initializers can perform long-running Java work. Release
+               the metadata lock so normal interpreter/JIT safepoints remain
+               available to GC while the superclass initializes. */
+            runtime->thrd_info->no_pause--;
+            vm_share_unlock(runtime->jvm);
             class_clinit(superclass, runtime);
+            vm_share_lock(runtime->jvm);
+            runtime->thrd_info->no_pause++;
         }
 
         MethodPool *p = &(clazz->methodPool);
@@ -582,11 +589,14 @@ void class_clinit(JClass *clazz, Runtime *runtime) {
             //jvm_printf("%s,%s\n", utf8_cstr(p->methodRef[i].name), utf8_cstr(p->methodRef[i].descriptor));
             MethodInfo *mi = &(p->method[i]);
             if (utf8_equals_c(mi->name, STR_METHOD_CLINIT)) {
-
+                runtime->thrd_info->no_pause--;
+                vm_share_unlock(runtime->jvm);
                 s32 ret = execute_method_impl(mi, runtime);
                 if (ret == RUNTIME_STATUS_EXCEPTION) {
                     print_exception(runtime);
                 }
+                vm_share_lock(runtime->jvm);
+                runtime->thrd_info->no_pause++;
                 //jvm_printf("clinit %s.%s\n", utf8_cstr(clazz->name), utf8_cstr(mi->name));
                 break;
             }
