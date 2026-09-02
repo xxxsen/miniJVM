@@ -2123,8 +2123,13 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                    inflates the MIDlet JAR, then restore the original depth. */
                 s32 unlocked = 0;
                 JavaThreadInfo *owner = (JavaThreadInfo *) (intptr_t) thrd_current();
-                s32 release_inherited = jloader && jloader->mb.clazz &&
-                        utf8_equals_c(jloader->mb.clazz->name, "org/recompile/mobile/MIDletLoader");
+                s32 release_inherited = 0;
+                if (jloader && jloader->mb.clazz) {
+                    Utf8String *loader_name = jloader->mb.clazz->name;
+                    release_inherited =
+                            utf8_equals_c(loader_name, "org/recompile/mobile/MIDletLoader") ||
+                            utf8_equals_c(loader_name, "sun/misc/Launcher$AppClassLoader");
+                }
                 do {
                     vm_share_unlock(jvm);
                     unlocked++;
