@@ -2116,13 +2116,22 @@ JClass *load_class(Instance *jloader, Utf8String *pClassName, Runtime *runtime) 
                 push_ref(runtime->stack, jstr);
                 push_ref(runtime->stack, jloader);
 
-                /* The Java ClassLoader may read and inflate an entry from a
-                   large MIDlet JAR. Its arguments are rooted on the operand
-                   stack, so let that Java work run at normal GC safepoints
-                   instead of retaining the recursive VM metadata lock. */
-                vm_share_unlock(jvm);
+                /* The Java ClassLoader may be reached through nested class
+                   resolution and inherit multiple recursive metadata locks.
+                   Its arguments are rooted on the operand stack, so release
+                   every lock level owned by this thread while it reads and
+                   inflates the MIDlet JAR, then restore the original depth. */
+                s32 unlocked = 0;
+                JavaThreadInfo *owner = (JavaThreadInfo *) (intptr_t) thrd_current();
+                s32 release_inherited = jloader && jloader->mb.clazz &&
+                        utf8_equals_c(jloader->mb.clazz->name, "org/recompile/mobile/MIDletLoader");
+                do {
+                    vm_share_unlock(jvm);
+                    unlocked++;
+                } while (release_inherited && jvm->threadlock.owner_thread == owner &&
+                        jvm->threadlock.count > 0);
                 s32 ret = execute_method_impl(jvm->shortcut.launcher_loadClass, runtime);
-                vm_share_lock(jvm);
+                while (unlocked-- > 0) vm_share_lock(jvm);
                 if (!ret) {
                     Instance *ins_of_clazz = pop_ref(runtime->stack);
                     if (ins_of_clazz) {
