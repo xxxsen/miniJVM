@@ -22,6 +22,15 @@
 
 GlobeRefer refers;
 
+#ifdef EMSCRIPTEN
+static u32 web_presented_frames = 0;
+
+EMSCRIPTEN_KEEPALIVE
+double j2me_get_frame_count(void) {
+    return __atomic_load_n(&web_presented_frames, __ATOMIC_RELAXED);
+}
+#endif
+
 
 /* ==============================   local tools  =================================*/
 
@@ -1446,6 +1455,9 @@ int org_mini_glfw_Glfw_glfwSwapBuffers(Runtime *runtime, JClass *clazz) {
     pos += 2;
     env->jthread_block_enter(runtime);//swapbuffers may spent long times , it will blocking gc STW
     glfwSwapBuffers(window);
+#ifdef EMSCRIPTEN
+    __atomic_add_fetch(&web_presented_frames, 1, __ATOMIC_RELAXED);
+#endif
     env->jthread_block_exit(runtime);
     return 0;
 }

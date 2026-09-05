@@ -34,6 +34,45 @@ s32 _gc_copy_objs_from_thread(Runtime *pruntime);
 
 s64 _garbage_collect(GcCollector *collector);
 
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
+
+/* One JVM per modularized browser instance. Requests never block the browser
+ * thread: the collector owns the VM and thread-list locks and acknowledges
+ * only after every mutator has reached an existing GC safepoint. */
+static s32 web_pause_requested = 0;
+static s32 web_pause_state = 0;
+
+EMSCRIPTEN_KEEPALIVE
+void j2me_request_pause(s32 paused) {
+    __atomic_store_n(&web_pause_requested, paused != 0, __ATOMIC_RELEASE);
+}
+
+EMSCRIPTEN_KEEPALIVE
+s32 j2me_get_pause_state(void) {
+    return __atomic_load_n(&web_pause_state, __ATOMIC_ACQUIRE);
+}
+
+static s32 _gc_service_web_pause(GcCollector *collector) {
+    if (!__atomic_load_n(&web_pause_requested, __ATOMIC_ACQUIRE)) return 0;
+    MiniJVM *jvm = collector->jvm;
+    if (vm_share_trylock(jvm) != thrd_success) return 1;
+    s32 result = _gc_pause_the_world(jvm);
+    if (result == 0) {
+        __atomic_store_n(&web_pause_state, 1, __ATOMIC_RELEASE);
+        while (__atomic_load_n(&web_pause_requested, __ATOMIC_ACQUIRE) &&
+               collector->_garbage_thread_status != GARBAGE_THREAD_STOP) {
+            threadSleep(10);
+        }
+    }
+    _gc_resume_the_world(jvm);
+    vm_share_unlock(jvm);
+    if (result != 0) __atomic_store_n(&web_pause_requested, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&web_pause_state, result == 0 ? 0 : -1, __ATOMIC_RELEASE);
+    return 1;
+}
+#endif
+
 void _gc_print_obj_list(GcCollector *pType);
 
 static void _gc_append_thread_name(Runtime *runtime, Utf8String *ustr) {
@@ -468,6 +507,12 @@ s32 _gc_thread_run(void *para) {
         if (collector->_garbage_thread_status == GARBAGE_THREAD_STOP) {
             break;
         }
+#ifdef EMSCRIPTEN
+        if (_gc_service_web_pause(collector)) {
+            threadSleep(10);
+            continue;
+        }
+#endif
         if (collector->dump_flag == 1) {
             _garbage_collect(collector);
             collector->lastgc = cur_mil;
